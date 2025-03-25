@@ -40,11 +40,17 @@ fun GameScreen(navController: NavHostController, playerWinsState: MutableState<I
     var rollCount by remember { mutableStateOf(0) }
     var gameOver by remember { mutableStateOf(false) }
 
-    var selectedDice by remember { mutableStateOf(mutableSetOf<Int>()) }
+    var selectedDiceIndex by remember { mutableStateOf<Int?>(null) }
+
 
 
     var finalGameOver by remember { mutableStateOf(false) }
 
+
+    var computerRollCount by remember { mutableStateOf(0) }
+    var computerSelectedDice by remember { mutableStateOf(MutableList(5) { false }) }
+
+    var triggerAutoComputerRoll by remember { mutableStateOf(false) }
 
 
 
@@ -61,7 +67,8 @@ fun GameScreen(navController: NavHostController, playerWinsState: MutableState<I
                 playerScore = 0
                 computerScore = 0
                 rollCount = 0
-                selectedDice.clear()
+                selectedDiceIndex = null
+
                 playerDice = List(5) { Random.nextInt(1, 7) }
                 computerDice = List(5) { Random.nextInt(1, 7) }
 
@@ -95,10 +102,52 @@ fun GameScreen(navController: NavHostController, playerWinsState: MutableState<I
             playerScore += tempPlayerScore
             computerScore += tempComputerScore
             rollCount = 0
-            selectedDice.clear()
+            computerRollCount = 0
+            computerSelectedDice = MutableList(5) { false }
+
+            selectedDiceIndex = null
+
             checkWinner()
         }
     }
+
+    fun performComputerRoll() {
+        if (computerRollCount >= 3) return
+
+        val scoreDifference = computerScore - playerScore
+        val currentSum = computerDice.sum()
+
+        val shouldReroll = when {
+            currentSum >= 24 && scoreDifference >= 0 -> false
+            currentSum <= 17 && scoreDifference < 0 -> true
+            else -> true
+        }
+
+        if (computerRollCount > 0 && !shouldReroll) return
+
+        // ✅ SAFELY BUILD THE SELECTION LIST
+        val newSelectedDice = computerDice.map { die ->
+            when {
+                die >= 5 -> true
+                scoreDifference < -20 -> false
+                die >= 4 && currentSum >= 22 -> true
+                else -> false
+            }
+        }
+
+        // ✅ SAFELY UPDATE DICE BASED ON SELECTION
+        computerDice = computerDice.mapIndexed { index, oldValue ->
+            if (newSelectedDice[index]) oldValue else Random.nextInt(1, 7)
+        }
+
+        computerSelectedDice = newSelectedDice.toMutableList()
+        tempComputerScore = computerDice.sum()
+        computerRollCount++
+    }
+
+
+
+
 
 
 
@@ -205,11 +254,13 @@ fun GameScreen(navController: NavHostController, playerWinsState: MutableState<I
                             contentDescription = "Player Dice",
                             modifier = Modifier
                                 .size(60.dp)
-                                .background(if (selectedDice.contains(index) && rollCount > 0) Color.Yellow else Color.Transparent)
+                                .background(if (selectedDiceIndex == index && rollCount > 0) Color.Yellow else Color.Transparent)
+
                                 .clickable(enabled = rollCount > 0 && !gameOver) {
-                                    if (selectedDice.contains(index)) selectedDice.remove(index)
-                                    else selectedDice.add(index)
+                                    selectedDiceIndex = if (selectedDiceIndex == index) null else index
                                 }
+
+
                         )
                     }
                 }
@@ -222,7 +273,7 @@ fun GameScreen(navController: NavHostController, playerWinsState: MutableState<I
                     onClick = {
                         if (!gameOver && rollCount < 3) {
                             playerDice = playerDice.mapIndexed { index, oldValue ->
-                                if (selectedDice.contains(index) && rollCount > 0) oldValue else Random.nextInt(1, 7)
+                                if (selectedDiceIndex == index && rollCount > 0) oldValue else Random.nextInt(1, 7)
                             }
 
                             computerDice = List(5) { Random.nextInt(1, 7) }
@@ -233,45 +284,57 @@ fun GameScreen(navController: NavHostController, playerWinsState: MutableState<I
                             rollCount++
 
                             if (rollCount == 3) {
-                                addScore()
+                                triggerAutoComputerRoll = true
                             }
                         }
- else if (!gameOver && rollCount < 3) {
-                            // 🎲 Regular rolling
-                            playerDice = playerDice.mapIndexed { index, oldValue ->
-                                if (selectedDice.contains(index) && rollCount > 0) oldValue else Random.nextInt(1, 7)
-                            }
-
-                            computerDice = List(5) { Random.nextInt(1, 7) }
-
-                            tempPlayerScore = playerDice.sum()
-                            tempComputerScore = computerDice.sum()
-
-                            rollCount++
-
-                            if (rollCount == 3) {
-                                addScore()
-                            }
-                        }
-                    }
-,
-                    modifier = Modifier.fillMaxWidth(0.5f).height(60.dp),
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth(0.5f)
+                        .height(60.dp),
                     enabled = rollCount < 3 && !gameOver
                 ) {
                     Text(text = "Roll", fontSize = 20.sp)
                 }
 
+// 🟢 Auto computer finish if rollCount reaches 3
+                if (triggerAutoComputerRoll) {
+                    LaunchedEffect(triggerAutoComputerRoll) {
+                        repeat(3 - computerRollCount) {
+                            performComputerRoll()
+                            kotlinx.coroutines.delay(300L)
+                        }
+                        addScore()
+                        triggerAutoComputerRoll = false
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(15.dp))
 
-                // Score Button
+// 🟣 Score Button
+                var triggerManualComputerRoll by remember { mutableStateOf(false) }
+
                 Button(
-                    onClick = { addScore() },
-                    modifier = Modifier.fillMaxWidth(0.5f).height(60.dp),
+                    onClick = {
+                        triggerManualComputerRoll = true
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth(0.5f)
+                        .height(60.dp),
                     enabled = rollCount > 0 && rollCount < 3 && !gameOver
-
-
                 ) {
                     Text(text = "Score", fontSize = 20.sp)
+                }
+
+// 🟢 Auto computer finish if user clicks Score early
+                if (triggerManualComputerRoll) {
+                    LaunchedEffect(triggerManualComputerRoll) {
+                        repeat(3 - computerRollCount) {
+                            performComputerRoll()
+                            kotlinx.coroutines.delay(300L)
+                        }
+                        addScore()
+                        triggerManualComputerRoll = false
+                    }
                 }
             }
         }
